@@ -4,6 +4,7 @@ DROP VIEW IF EXISTS analysis.contracts_merged;
 DROP VIEW IF EXISTS analysis.contracts;
 
 DROP VIEW IF EXISTS analysis.contracts_status;
+DROP VIEW IF EXISTS analysis.contracts_runner;
 DROP VIEW IF EXISTS analysis.contracts_tags;
 DROP VIEW IF EXISTS analysis.contracts_txout;
 DROP VIEW IF EXISTS analysis.contracts_stakeaddress;
@@ -56,12 +57,20 @@ CREATE OR REPLACE VIEW analysis.contracts_size
      JOIN marlowe.contracttxout USING (txid, txix, blockid);
 
 -- analysis.contracts_tags get the tags of a contract
--- this is currently not used, as contracts can have multiple tags
+-- note some contracts have multiple tags
 CREATE OR REPLACE VIEW analysis.contracts_tags
  AS
  SELECT contracttxouttag.txid,
     contracttxouttag.tag
    FROM marlowe.contracttxouttag;
+
+-- are contracts created on runner
+CREATE OR REPLACE VIEW analysis.contracts_runner
+ AS
+ SELECT DISTINCT main.txid
+   FROM ( SELECT contracts_tags.txid
+           FROM analysis.contracts_tags
+          WHERE contracts_tags.tag = 'run-lite'::text) main;
 
 -- analysis.contracts_txout gets the total ada transacted and number of transactions of a contract
 CREATE OR REPLACE VIEW analysis.contracts_txout
@@ -132,7 +141,7 @@ CREATE OR REPLACE VIEW analysis.contracts
 -- analysis.contracts_merged is a list of unique contracts created with its related information
 CREATE OR REPLACE VIEW analysis.contracts_merged
  AS
-  SELECT encode(contracts.txid, 'hex'::text) AS id,
+   SELECT encode(contracts.txid, 'hex'::text) AS id,
     contracts.blockno,
     contracts.slotno,
     contracts.created,
@@ -141,7 +150,11 @@ CREATE OR REPLACE VIEW analysis.contracts_merged
     size.size,
     txout.ada_transacted,
     txout.num_transactions,
-    encode(contracts_stakeaddress.addressstakeaddressreference, 'hex'::text) AS stakeaddress
+    encode(contracts_stakeaddress.addressstakeaddressreference, 'hex'::text) AS stakeaddress,
+        CASE
+            WHEN runner.txid IS NULL THEN 0
+            ELSE 1
+        END AS is_runner
    FROM ( SELECT contracts_1.txid,
             contracts_1.created,
             contracts_1.closed,
@@ -160,7 +173,9 @@ CREATE OR REPLACE VIEW analysis.contracts_merged
            FROM analysis.contracts_txout) txout ON contracts.txid = txout.txid
      LEFT JOIN ( SELECT contracts_stakeaddress_1.txid,
             contracts_stakeaddress_1.addressstakeaddressreference
-           FROM analysis.contracts_stakeaddress contracts_stakeaddress_1) contracts_stakeaddress ON contracts.txid = contracts_stakeaddress.txid;
+           FROM analysis.contracts_stakeaddress contracts_stakeaddress_1) contracts_stakeaddress ON contracts.txid = contracts_stakeaddress.txid
+     LEFT JOIN ( SELECT contracts_runner.txid
+           FROM analysis.contracts_runner) runner ON contracts.txid = runner.txid;
 
 -- this is old analysis.contracts_merged, has been replace with above that filter out contracts in blacklists
 --     SELECT encode(contracts.txid, 'hex'::text) AS id,
